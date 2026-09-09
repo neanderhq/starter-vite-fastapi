@@ -1,0 +1,31 @@
+# Only run against an isolated development database; never production.
+import os
+from datetime import datetime,timedelta,timezone
+import secrets
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+from sqlalchemy import delete
+from app import app
+from server.auth import token_hash
+from server.auth_models import User,AppSession
+from server.database import get_engine
+
+with TestClient(app) as client:
+ assert client.get('/api/me').status_code==401
+ assert client.get('/api/auth/callback/google?code=fake&state=forged').status_code==400
+ token=secrets.token_urlsafe(32)
+ with Session(get_engine()) as db:
+  user=User(google_sub='test-'+secrets.token_hex(8),name='Session test');db.add(user);db.flush();uid=user.id
+  db.add(AppSession(token_hash=token_hash(token),user_id=uid,expires_at=datetime.now(timezone.utc)+timedelta(days=1)));db.commit()
+ client.cookies.set('app_session',token)
+ assert client.get('/api/me').json()['id']==str(uid)
+ assert client.post('/api/auth/logout',headers={'origin':'https://attacker.invalid'}).status_code==403
+ assert client.get('/api/me').status_code==200
+ # A new client reads the same persisted session rather than process memory.
+ with TestClient(app) as second:
+  second.cookies.set('app_session',token)
+  assert second.get('/api/me').status_code==200
+ assert client.post('/api/auth/logout',headers={'origin':os.environ.get('AUTH_BASE_URL','http://localhost:5173')}).status_code==204
+ assert client.get('/api/me').status_code==401
+ with Session(get_engine()) as db:db.execute(delete(User).where(User.id==uid));db.commit()
+print('Python auth: anonymous, forged state, persisted session, CSRF and logout passed')

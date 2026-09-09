@@ -1,0 +1,60 @@
+from typing import Annotated
+from uuid import UUID
+from fastapi import APIRouter, Depends, HTTPException, Response
+from pydantic import BaseModel, ConfigDict, StringConstraints
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+from .database import session
+from .models import Todo
+
+router = APIRouter(prefix="/api/todos")
+Database = Annotated[Session, Depends(session)]
+
+
+class NewTodo(BaseModel):
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+
+
+class UpdateTodo(BaseModel):
+    done: bool
+
+
+class TodoView(NewTodo):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    done: bool
+
+
+@router.get("", response_model=list[TodoView])
+def list_todos(db: Database):
+    return db.scalars(select(Todo).limit(100)).all()
+
+
+@router.post("", response_model=TodoView, status_code=201)
+def create_todo(body: NewTodo, db: Database):
+    todo = Todo(title=body.title)
+    db.add(todo)
+    db.commit()
+    db.refresh(todo)
+    return todo
+
+
+@router.patch("/{todo_id}", response_model=TodoView)
+def update_todo(todo_id: UUID, body: UpdateTodo, db: Database):
+    todo = db.get(Todo, todo_id)
+    if todo is None:
+        raise HTTPException(status_code=404)
+    todo.done = body.done
+    db.commit()
+    db.refresh(todo)
+    return todo
+
+
+@router.delete("/{todo_id}", status_code=204)
+def delete_todo(todo_id: UUID, db: Database):
+    todo = db.get(Todo, todo_id)
+    if todo is None:
+        raise HTTPException(status_code=404)
+    db.delete(todo)
+    db.commit()
+    return Response(status_code=204)

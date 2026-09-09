@@ -1,0 +1,90 @@
+from datetime import datetime, timedelta, timezone
+import hashlib
+import os
+import secrets
+from urllib.parse import urlsplit
+
+from authlib.integrations.starlette_client import OAuth, OAuthError
+from fastapi import Depends, HTTPException, Request, Response
+from fastapi.responses import RedirectResponse
+from sqlalchemy import delete, select
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.orm import Session
+from starlette.middleware.sessions import SessionMiddleware
+from .auth_models import AppSession, User
+from .database import get_engine
+
+COOKIE = "app_session"
+LIFETIME = 60 * 60 * 24 * 7
+
+
+def token_hash(token):
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def install_auth(app):
+    origin = os.environ.get("AUTH_BASE_URL", "http://localhost:5173").rstrip("/")
+    parsed = urlsplit(origin)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.path or parsed.query or parsed.fragment or parsed.username is not None:
+        raise RuntimeError("AUTH_BASE_URL must be a canonical origin")
+    if parsed.scheme != "https" and parsed.hostname not in {"localhost", "127.0.0.1"}:
+        raise RuntimeError("Production authentication requires HTTPS")
+    secure = parsed.scheme == "https"
+    secret = os.environ["SESSION_SECRET"]
+    if len(secret) < 32:
+        raise RuntimeError("SESSION_SECRET must contain at least 32 characters")
+    app.add_middleware(SessionMiddleware, secret_key=secret, session_cookie="oauth_state", max_age=600, https_only=secure, same_site="lax")
+    oauth = OAuth()
+    oauth.register("google", client_id=os.environ["GOOGLE_CLIENT_ID"], client_secret=os.environ["GOOGLE_CLIENT_SECRET"], server_metadata_url="https://accounts.google.com/.well-known/openid-configuration", client_kwargs={"scope": "openid email profile", "code_challenge_method": "S256"})
+
+    def current_user(request: Request):
+        if request.method not in {"GET", "HEAD", "OPTIONS"} and request.headers.get("origin") != origin:
+            raise HTTPException(status_code=403, detail="Untrusted request origin")
+        token = request.cookies.get(COOKIE)
+        if not token:
+            raise HTTPException(status_code=401, detail="Sign in required")
+        with Session(get_engine()) as db:
+            user = db.scalar(select(User).join(AppSession).where(AppSession.token_hash == token_hash(token), AppSession.expires_at > datetime.now(timezone.utc)))
+            if user is None:
+                raise HTTPException(status_code=401, detail="Session expired")
+            return {"id": str(user.id), "name": user.name}
+
+    @app.get("/api/auth/login/google")
+    async def login(request: Request):
+        return await oauth.google.authorize_redirect(request, origin + "/api/auth/callback/google")
+
+    @app.get("/api/auth/callback/google")
+    async def callback(request: Request):
+        try:
+            token = await oauth.google.authorize_access_token(request)
+        except OAuthError:
+            raise HTTPException(status_code=400, detail="OAuth verification failed") from None
+        claims = token.get("userinfo")
+        if not claims or not isinstance(claims.get("sub"), str) or claims.get("email_verified") is not True:
+            raise HTTPException(status_code=400, detail="Verified Google identity required")
+        # Use the provider's immutable subject; never link accounts by email.
+        with Session(get_engine()) as db:
+            statement = insert(User).values(google_sub=claims["sub"], name=str(claims.get("name", ""))[:255])
+            user = db.scalar(statement.on_conflict_do_update(index_elements=[User.google_sub], set_={"name": statement.excluded.name}).returning(User))
+            session_token = secrets.token_urlsafe(32)
+            db.add(AppSession(token_hash=token_hash(session_token), user_id=user.id, expires_at=datetime.now(timezone.utc) + timedelta(seconds=LIFETIME)))
+            db.commit()
+        request.session.clear()
+        response = RedirectResponse(origin + "/", status_code=302)
+        response.set_cookie(COOKIE, session_token, max_age=LIFETIME, httponly=True, secure=secure, samesite="lax", path="/")
+        return response
+
+    @app.get("/api/me")
+    def me(user=Depends(current_user)):
+        return user
+
+    @app.post("/api/auth/logout", status_code=204)
+    def logout(request: Request, user=Depends(current_user)):
+        with Session(get_engine()) as db:
+            db.execute(delete(AppSession).where(AppSession.token_hash == token_hash(request.cookies[COOKIE])))
+            db.commit()
+        response = Response(status_code=204)
+        response.delete_cookie(COOKIE, path="/", secure=secure, httponly=True, samesite="lax")
+        return response
+
+    return current_user
