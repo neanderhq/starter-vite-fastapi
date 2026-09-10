@@ -6,6 +6,8 @@ Publish uses `.neander/compose.yaml`. For local production verification, run `do
 
 No database or authentication is installed. Add these only when requested. Keep callback/backend origins in runtime server configuration and browser API calls relative. Never commit `.env` files with credentials. Stack provenance is in `docs/architecture/stack-decision.md`.
 
+When persistence is requested, follow the [Postgres block's local setup](.neander/blocks/postgres/README.md#local-development): use existing system Postgres or its optional Docker Compose example, apply migrations, and verify CRUD across an app restart. Managed Neon is not needed to build and test locally; production still uses the managed Neon recipe contract.
+
 
 ## Maintenance and verification
 
