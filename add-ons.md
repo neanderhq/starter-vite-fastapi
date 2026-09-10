@@ -18,7 +18,7 @@ Managed production database metadata uses the existing recipe contract:
   provider: Neon
 ```
 
-Use the separately attached development connection for local work. Never use production database credentials in local chat, templates or recipe sandboxes. Schema migrations are explicit, additive operations before app rollout; they must not run during Docker build or every application startup. A database change is not reversed by an application rollback.
+For local work, use existing system Postgres or the optional [development Compose setup](.neander/blocks/postgres/README.md#local-development). A separately attached development Neon connection is optional. Never use production database credentials in local chat, templates or recipe sandboxes. Schema migrations are explicit, additive operations before app rollout; they must not run during Docker build or every application startup. A database change is not reversed by an application rollback.
 
 Origin-dependent server variables declare provider `Neander`, binding `public_origin`, and an optional path. For example, `BETTER_AUTH_URL` can bind to the origin and `BACKEND_URI` to `/api`. Keep browser calls same-origin and do not bake secrets or callback origins into `NEXT_PUBLIC_*`/`VITE_*` values. OAuth provider client credentials remain user input; registering a provider callback still requires the provider's setup.
 
