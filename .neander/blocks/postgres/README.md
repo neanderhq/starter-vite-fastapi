@@ -18,7 +18,7 @@ For Docker, copy the optional example to the repository root only when adding pe
 
 ```sh
 cp -n .neander/blocks/postgres/compose.dev.yaml.example compose.dev.yaml
-docker compose -f compose.dev.yaml up -d --wait --wait-timeout 120
+docker compose -p YOUR_UNIQUE_PROJECT -f compose.dev.yaml up -d --wait --wait-timeout 120
 ```
 
 The database listens only on `127.0.0.1:55432`. If that port is busy, export a free port, such as `export PGPORT=55433`, before running Compose. Add this line to `.env.local`, adjusting the port to match; preserve any other variables already in that file:
@@ -27,7 +27,7 @@ The database listens only on `127.0.0.1:55432`. If that port is busy, export a f
 DATABASE_URL=postgresql://neander_dev:neander_dev_only@127.0.0.1:55432/neander_dev
 ```
 
-These are development-only credentials for this local container. Compose scopes the named volume to the project directory. When running clones with the same directory name, set a unique `COMPOSE_PROJECT_NAME` and free `PGPORT` per clone; retain them for subsequent Compose commands. No fixed container or volume name is shared across projects.
+These are development-only credentials for this local container. Compose scopes the named volume to the explicit project name. Replace `YOUR_UNIQUE_PROJECT` with a stable unique name and select a free `PGPORT` per project; retain both for subsequent commands. No fixed container or volume name is shared across projects.
 
 With the example modules installed, apply migrations and start the API:
 
@@ -44,7 +44,7 @@ python3 scripts/check-addon-crud.py http://127.0.0.1:8000
 python3 scripts/check-addon-crud.py http://127.0.0.1:8000 PERSISTED_ID
 ```
 
-This creates, updates and validates a test row; the second command verifies persistence across an app restart and deletes that row. To also verify volume persistence, do the following **before the second check**: stop the app, run `docker compose -f compose.dev.yaml down`, bring it back with the same `up` command, and restart the app. Then run the second check once with the saved ID. If you already deleted that row, run the first command again to create a new one. `down` preserves the named volume; do not add `--volumes` or automatically reset the database. Local checks establish local persistence, not managed Neon or production deployment readiness.
+This creates, updates and validates a test row; the second command verifies persistence across an app restart and deletes that row. To also verify volume persistence, do the following **before the second check**: stop the app, run `docker compose -p YOUR_UNIQUE_PROJECT -f compose.dev.yaml down`, bring it back with the same `up` command, and restart the app. Then run the second check once with the saved ID. If you already deleted that row, run the first command again to create a new one. `down` preserves the named volume; do not add `--volumes` or automatically reset the database. Local checks establish local persistence, not managed Neon or production deployment readiness.
 
 ## Production
 
@@ -57,3 +57,11 @@ Test POST `/api/todos` with `{"title":"Persist me"}`, PATCH `/api/todos/<id>` wi
 Sources: [SQLAlchemy PostgreSQL](https://docs.sqlalchemy.org/en/20/dialects/postgresql.html), [Alembic tutorial](https://alembic.sqlalchemy.org/en/latest/tutorial.html), [Compose health waiting](https://docs.docker.com/reference/cli/docker/compose/up/), [Compose volume persistence](https://docs.docker.com/reference/compose-file/volumes/).
 
 Declare `migration: fastapi-alembic` directly under `x-neander` when the migration files are present. Publish then runs that fixed profile in the isolated database-only migration step before application rollout. Do not add arbitrary shell commands to Compose.
+
+## Maintained deployment recipe
+
+This block includes `.neander/compose.yaml.example`, a complete recipe including its database prerequisites. Merge its `x-neander` declarations into the project's `.neander/compose.yaml` as you install the block; do not replace existing services, probes or application-specific requirements. Every environment entry includes `service`, `name`, `required`, `source` and `provider`. The `provider: null` field is mandatory for generated and user-supplied values. Keep the matching migration profile and commit its source files and lockfile in the same change.
+
+Read `docs/deployment-contract.md` before changing database or authentication setup. Keep the public health endpoint accessible when protecting application pages. A valid recipe goes directly to Cloud Run Compose; adding an add-on must not depend on a recipe agent to reconstruct this metadata at Publish time.
+
+Use one stable, unique project name in place of `YOUR_UNIQUE_PROJECT` on **every** Compose command. Always pass both `-p` and `-f`; inherited `COMPOSE_PROJECT_NAME` or `COMPOSE_FILE` must not select another project. Use a different free host port for each concurrently running database.

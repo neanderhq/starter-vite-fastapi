@@ -10,6 +10,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
+      - name: Check deployment examples
+        run: |
+          python3 -m pip install PyYAML==6.0.3
+          python3 scripts/test_deployment_contract.py
       - name: Build locked production image
         run: docker build -f .neander/Dockerfile -t neander-starter-vite-fastapi:local .
       - name: Check literal environment handling

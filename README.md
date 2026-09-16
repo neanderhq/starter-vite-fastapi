@@ -26,3 +26,7 @@ docker rm --force starter-check
 The CI workflow runs these base container checks on every pull request and main push. It requires no cloud credentials or database. After installing a database block, use `python3 scripts/check-addon-crud.py ORIGIN`, restart the disposable app, then repeat with its printed ID to check persistence and delete the test row. Follow the block's README for migrations and authentication checks.
 
 Pinned dependencies, production recipes, and building blocks were preserved during extraction from Neander. Repeat production certification when dependencies or base-image tags change; local container checks do not establish Cloud Run latency or real OAuth-provider login. No open-source license is granted by this private repository.
+
+## Keeping Publish ready
+
+Follow [the deployment contract](docs/deployment-contract.md) when adding database or authentication features. Each block includes a complete production recipe example; merge it in the same change as the implementation. The base starter remains database-free.
