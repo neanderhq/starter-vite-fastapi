@@ -1,0 +1,2 @@
+# Dependency installation scripts are enabled for Neander project development.
+dangerouslyAllowAllBuilds: true
